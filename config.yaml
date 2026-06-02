@@ -1,0 +1,17 @@
+# config.yaml
+base_dir: "./data"
+srp_id: "SRP151023"
+pp_QC_dir: "./pp_QC"
+# References & Annotations (Matches your script configurations)
+genome_dir: "/home/hlinh/homo_ref/star_index_homo"
+gtf_file: "/home/hlinh/homo_ref/Homo_sapiens.GRCh38.115.gtf"
+mask_file: "/home/hlinh/homo_ref/hg38_repeat_masker.gtf"
+#solo_whitelist: None
+solo_whitelist_v2: "/home/hlinh/homo_ref/737K-august-2016.txt"
+solo_whitelist_v3: "/home/hlinh/homo_ref/3M-february-2018.txt"
+#snakemake -n -p -r
+
+#snakemake --profile /home/share/ag_klughammer/cluster_setup/snakemake_cluster_configs/slurm_nice \
+#          --jobs 15 \
+#          --resources download_slots=1 star_slots=1 velocyto_slots=2 \
+#          --latency-wait 120
