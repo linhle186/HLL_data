@@ -203,7 +203,7 @@ rule velocyto:
 rule pp_qc:
     input:
         looms = expand(os.path.join(BASE_DIR, f"{SRP_ID}_velocyto/{{gsm}}_velocyto/{{gsm}}_Aligned.sortedByCoord.out.loom"), gsm=GSMS),
-        script = os.path.join(PP_QC_DIR, "data_pp_smk.py")
+        script = "data_pp_smk.py"
     output:
         h5ad = os.path.join(BASE_DIR, f"{SRP_ID}_processed.h5ad")
     threads: 4
