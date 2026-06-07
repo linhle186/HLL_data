@@ -5,8 +5,6 @@ import urllib.request
 import urllib.parse
 import csv
 
-
-
 # Load configuration file variables
 configfile: "config.yaml"
 
@@ -14,22 +12,21 @@ BASE_DIR = config["base_dir"]
 PP_QC_DIR = config["pp_QC_dir"]
 SRP_ID = config["srp_id"]
 RUN_TABLE = os.path.join(BASE_DIR, "SraRunTable.csv")
-#SRR_LIST_PATH = os.path.join(BASE_DIR, "SRR_Acc_List.txt")
 
 os.makedirs(BASE_DIR, exist_ok=True)
 os.makedirs(PP_QC_DIR, exist_ok=True)
 
 if not os.path.exists(RUN_TABLE):
     print(f"SraRunTable.csv not found. Fetching from NCBI for {SRP_ID}...")
-    
+
     search_params = {"db": "sra", "term": SRP_ID, "retmode": "json", "retmax": 500}
     search_url = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?" + urllib.parse.urlencode(search_params)
-    
+
     try:
         # Search SRA
         with urllib.request.urlopen(search_url) as response:
             id_list = json.loads(response.read().decode()).get("esearchresult", {}).get("idlist", [])
-            
+
         if id_list:
             # Fetch Metadata
             fetch_params = {"db": "sra", "id": ",".join(id_list), "rettype": "runinfo", "retmode": "text"}
@@ -39,9 +36,7 @@ if not os.path.exists(RUN_TABLE):
     except Exception as e:
         print(f"Warning: Failed to retrieve SRA metadata: {e}")
 
-
-# 1. Parse SraRunTable to dynamically establish SRR (Run) -> GSM (GEO Sample) mapping
-# Dynamically map GSM -> list of R1 SRRs and GSM -> list of R2 SRRs based on spot length
+# Parse SraRunTable to dynamically establish SRR (Run) -> GSM (GEO Sample) mapping
 gsm_to_download = {}
 srrs_to_download = []
 
@@ -52,50 +47,43 @@ if os.path.exists(RUN_TABLE):
     with open(RUN_TABLE, 'r') as f:
         reader = csv.DictReader(f, delimiter=delimiter)
         headers = reader.fieldnames
-        
+
         run_col = next((h for h in headers if h.lower() in ['run', 'run_s']), None)
-        gsm_col = next((h for h in headers if h.lower() in ['samplename']), None)
-        
-        
+        gsm_col = next((h for h in headers if h.lower() in ['samplename', 'sample_name', 'sample name', 'sample_name_s']), None)
+
         if run_col and gsm_col:
             for row in reader:
                 srr = row[run_col].strip()
                 gsm = row[gsm_col].strip()
-                
+
                 if srr and gsm:
-                     if gsm not in gsm_to_download:
+                    if gsm not in gsm_to_download:
                         gsm_to_download[gsm] = []
-                     gsm_to_download[gsm].append(srr)
-                     srrs_to_download.append(srr)
-                    # Note: spot_len == 8 (Index reads) are ignored entirely
+                    gsm_to_download[gsm].append(srr)
+                    srrs_to_download.append(srr)
 
 GSMS = sorted(list(set(gsm_to_download.keys())))
 SRRS = sorted(list(set(srrs_to_download)))
 
-# Target Rule: Defines final required outputs
+
+# Target Rule
 rule all:
     input:
         os.path.join(BASE_DIR, "GSM_Acc_List.txt"),
         os.path.join(BASE_DIR, f"{SRP_ID}_processed.h5ad")
 
 
-# Output is set to temp() so raw SRA fastqs are deleted once merged to GSMs, conserving storage.
 # STEP 1: Download and combine SRRs per GSM, cleaning up raw files on-the-fly
-# Output is set to temp() so the large combined fastqs are automatically deleted 
-# as soon as STAR alignment completes.
-rule download_and_concatenate_gsm:
+rule download_and_combine_sample:
     output:
         r1 = temp(os.path.join(BASE_DIR, "combined_fastq/{gsm}_1.fastq.gz")),
         r2 = temp(os.path.join(BASE_DIR, "combined_fastq/{gsm}_2.fastq.gz"))
     threads: 4
-    conda:
-        "scanpy_env"  # Activates your environment natively for the whole rule
     resources:
         mem_mb = 20000,
         runtime = 1440,
-        download_slots = 1  # Strictly throttles downloads to 1 GSM at a time
+        download_slots = 1  # Matches your run_pipeline.sh throttling flag
     params:
-        # FIX: Join with space to create a valid Bash sequence
         srrs_f = lambda wildcards: " ".join(gsm_to_download[wildcards.gsm]),
         temp_dir = os.path.join(BASE_DIR, "fastq/{gsm}_temp")
     shell:
@@ -111,21 +99,21 @@ rule download_and_concatenate_gsm:
         # Download and append paired-end runs sequentially
         for srr in {params.srrs_f}; do
             # 1. Download SRA archive
-            prefetch --max-size 100G -O {params.temp_dir} $srr
-            
-            # 2. Extract paired fastq files (_1.fastq and _2.fastq)
-            fasterq-dump -e {threads} --outdir {params.temp_dir} {params.temp_dir}/$srr
-            
+            conda run -n scanpy_env prefetch --max-size 100G -O {params.temp_dir} $srr
+
+            # 2. Extract paired fastq files
+            conda run -n scanpy_env fasterq-dump -e {threads} --outdir {params.temp_dir} {params.temp_dir}/$srr
+
             # 3. Compress both reads separately
-            pigz -f -p {threads} {params.temp_dir}/${srr}_1.fastq
-            pigz -f -p {threads} {params.temp_dir}/${srr}_2.fastq
-            
-            # 4. Append to target output (gzip format natively supports concatenation!)
-            cat {params.temp_dir}/${srr}_1.fastq.gz >> {output.r1}
-            cat {params.temp_dir}/${srr}_2.fastq.gz >> {output.r2}
-            
+            conda run -n scanpy_env pigz -f -p {threads} {params.temp_dir}/${{srr}}_1.fastq
+            conda run -n scanpy_env pigz -f -p {threads} {params.temp_dir}/${{srr}}_2.fastq
+
+            # 4. Append to target output
+            cat {params.temp_dir}/${{srr}}_1.fastq.gz >> {output.r1}
+            cat {params.temp_dir}/${{srr}}_2.fastq.gz >> {output.r2}
+
             # 5. Clean up temporary files for this run immediately to conserve space
-            rm -rf {params.temp_dir}/$srr {params.temp_dir}/${srr}_1.fastq.gz {params.temp_dir}/${srr}_2.fastq.gz
+            rm -rf {params.temp_dir}/$srr {params.temp_dir}/${{srr}}_1.fastq.gz {params.temp_dir}/${{srr}}_2.fastq.gz
         done
 
         # Final cleanup of empty temp directory
@@ -133,9 +121,7 @@ rule download_and_concatenate_gsm:
         """
 
 
-
-
-# STEP 2: Write unique GSMs list to a text file (Replaces combined_fastq.py final task)
+# STEP 2: Write unique GSMs list to a text file
 rule generate_gsm_list:
     input:
         run_table = RUN_TABLE
@@ -147,7 +133,7 @@ rule generate_gsm_list:
                 out_f.write(f"{gsm}\n")
 
 
-# STEP 3: Align with STAR Solo (Keeps your exact read file arrangement and cell filters)
+# STEP 3: Align with STAR Solo (Using combined fastq paths and 10xV2 single-cell chemistry)
 rule star_align:
     input:
         r1 = os.path.join(BASE_DIR, "combined_fastq/{gsm}_1.fastq.gz"),
@@ -159,7 +145,7 @@ rule star_align:
     resources:
         mem_mb = 64000,
         runtime = 2400,
-        star_slots = 1 
+        star_slots = 1
     params:
         genome_dir = config["genome_dir"],
         whitelist = config["solo_whitelist_v2"],
@@ -183,7 +169,7 @@ rule star_align:
         """
 
 
-# STEP 4: Run Velocyto (Specifies high-RAM config mirroring your sbatch allocation)
+# STEP 4: Run Velocyto (Single-cell 10xV2 execution with barcode filtering)
 rule velocyto:
     input:
         bam = os.path.join(BASE_DIR, f"{SRP_ID}_STAR/{{gsm}}_Aligned.sortedByCoord.out.bam"),
@@ -192,15 +178,16 @@ rule velocyto:
         loom = os.path.join(BASE_DIR, f"{SRP_ID}_velocyto/{{gsm}}_velocyto/{{gsm}}_Aligned.sortedByCoord.out.loom")
     threads: 4
     resources:
-        mem_mb = 200000, 
+        mem_mb = 200000,
         runtime = 2880,
-        velocyto_slots = 1  # <--- Assign 1 slot per Velocyto job
+        velocyto_slots = 1
     params:
         out_dir = os.path.join(BASE_DIR, f"{SRP_ID}_velocyto/{{gsm}}_velocyto"),
         mask_file = config["mask_file"],
         gtf_file = config["gtf_file"]
     shell:
         """
+        mkdir -p {params.out_dir}
         conda run -n scanpy_env velocyto run -b {input.barcodes} \
                      -o {params.out_dir} \
                      -m {params.mask_file} \
@@ -212,27 +199,30 @@ rule velocyto:
         """
 
 
-# STEP 5: Aggregation & QC Step (Combines all resolved loom outputs)
+# STEP 5: Aggregation & QC Step (Combines all resolved loom outputs using expand)
 rule pp_qc:
     input:
         looms = expand(os.path.join(BASE_DIR, f"{SRP_ID}_velocyto/{{gsm}}_velocyto/{{gsm}}_Aligned.sortedByCoord.out.loom"), gsm=GSMS),
-        script = f"data_pp_smk.py"
+        script = os.path.join(PP_QC_DIR, "data_pp_smk.py")
     output:
         h5ad = os.path.join(BASE_DIR, f"{SRP_ID}_processed.h5ad")
     threads: 4
     resources:
-        mem_mb = 100000,
+        mem_mb = 150000,  # Scaled to 150GB to handle multi-sample loom aggregation safely
         runtime = 2400
     params:
         srp_id = SRP_ID,
         pp_qc_dir = PP_QC_DIR
     shell:
         """
-        mv {input.script} ./{params.pp_qc_dir}/
+        # FIX BUG-7: Dynamically derive the active Conda environment's library directory
+        PREFIX=$(conda run -n scanpy_env bash -lc 'echo $CONDA_PREFIX')
+        export LD_PRELOAD="$PREFIX/lib/libstdc++.so.6"
 
-        # Explicitly preload your environment's modern C++ library to resolve CXXABI errors
-        export LD_PRELOAD=/home/hlinh/.conda/envs/scanpy_env/lib/libstdc++.so.6
-
-        # Execute your script
-        conda run -n scanpy_env python {input.script} --inputs {input.looms} --output {output.h5ad} --srp {params.srp_id}
+        # FIX BUG-2: Execute your script directly from its permanent location, passing the target backup directory explicitly
+        conda run -n scanpy_env python {input.script} \
+            --inputs {input.looms} \
+            --output {output.h5ad} \
+            --srp {params.srp_id} \
+            --qc_dir {params.pp_qc_dir}
         """
