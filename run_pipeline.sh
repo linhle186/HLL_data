@@ -9,7 +9,8 @@
 set -e
 
 # Path to the preconfigured cluster profile
-PROFILE_PATH="/home/share/ag_klughammer/cluster_setup/snakemake_cluster_configs/slurm_nice" # <-- UPDATE THIS PATH TO THE ACTUAL SNAKEMAKE PROFILE
+PROFILE_PATH="/home/share/ag_klughammer/cluster_setup/snakemake_cluster_configs/slurm_nice" # SFB
+PROFILE_PATH="/raid/ag_klughammer/shared/cluster_setup/snakemake_cluster_configs/slurm_nice" # DGX
 
 echo "=========================================================="
 echo "         STARTING AUTOMATED SINGLE-CELL PIPELINE          "
