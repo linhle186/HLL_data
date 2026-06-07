@@ -20,6 +20,18 @@ echo "SLURM Profile: $PROFILE_PATH"
 echo "=========================================================="
 echo ""
 
+# --- STAGE -1: ENVIRONMENT INITIALIZATION ---
+echo "Checking for required Conda environment..."
+# Check if scanpy_env is already installed on the server
+if ! conda info --envs | grep -q "scanpy_env"; then
+    echo "Environment 'scanpy_env' not found. Creating it from environment.yml..."
+    conda env create -f environment.yml -n scanpy_env
+    echo "Environment successfully created."
+else
+    echo "Environment 'scanpy_env' already exists. Skipping creation."
+fi
+echo ""
+
 # --- STAGE 0: UNLOCK WORKING DIRECTORIES ---
 echo "1. Unlocking Snakemake working directories..."
 snakemake -s Snakefile_prep --unlock 2>/dev/null || true
@@ -56,7 +68,7 @@ echo ""
 snakemake -s Snakefile \
           --profile "$PROFILE_PATH" \
           --jobs 6 \
-          --resources gsm_download_slots=4 star_slots=2 velocyto_slots=2 \
+          --resources download_slots=4 star_slots=2 velocyto_slots=2 \
           --latency-wait 120
 
 echo ""
