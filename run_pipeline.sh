@@ -1,5 +1,12 @@
 #!/bin/bash
-# run_pipeline.sh
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=16GB
+#SBATCH --mail-user=gyu@genzentrum.lmu.de
+#SBATCH --mail-type=fail
+#SBATCH -o %j.log
+#SBATCH -e %j.err
+#SBATCH -J RNAvelo.pp.pipeline
+#SBATCH -t 7-00:00:00
 # 
 # This script automates the complete single-cell RNA-seq workflow:
 # 1. Downloads, processes, and builds STAR indexes for both human and mouse.
@@ -9,7 +16,8 @@
 set -e
 
 # Path to the preconfigured cluster profile
-PROFILE_PATH="/home/share/ag_klughammer/cluster_setup/snakemake_cluster_configs/slurm_nice" # <-- UPDATE THIS PATH TO THE ACTUAL SNAKEMAKE PROFILE
+PROFILE_PATH="/home/share/ag_klughammer/cluster_setup/snakemake_cluster_configs/slurm_nice" # SFB
+PROFILE_PATH="/raid/ag_klughammer/shared/cluster_setup/snakemake_cluster_configs/slurm_nice" # DGX
 
 echo "=========================================================="
 echo "         STARTING AUTOMATED SINGLE-CELL PIPELINE          "
